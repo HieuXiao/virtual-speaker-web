@@ -15,5 +15,8 @@
   "devDependencies": {
     "concurrently": "^8.2.2",
     "typescript": "^5.4.5"
+  },
+  "dependencies": {
+    "@tweenjs/tween.js": "^25.0.0"
   }
 }

@@ -1,22 +1,13 @@
-import { useEffect, useRef } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/addons/loaders/GLTFLoader.js';
 import { VRMLoaderPlugin, VRMUtils } from '@pixiv/three-vrm';
+import { VRMAnimationLoader } from '@pixiv/three-vrm';
 import type { VRM } from '@pixiv/three-vrm';
-import { VRMAnimationLoaderPlugin, createVRMAnimationClip } from '@pixiv/three-vrm-animation';
 
-// ──────────────────────────────────────────────────────────────────────────────
-// Types exposed to the outside world
-// ──────────────────────────────────────────────────────────────────────────────
-export type PlayAnimationFn = (vrmaPath: string) => void;
-export type StopAnimationFn = () => void;
-
-interface ThreeSceneProps {
-  onReady?: (playAnimation: PlayAnimationFn, stopAnimation: StopAnimationFn) => void;
-}
-
-export default function ThreeScene({ onReady }: ThreeSceneProps) {
+export default function ThreeScene() {
   const mountRef = useRef<HTMLDivElement>(null);
+  const [currentAction, setCurrentAction] = useState(null);
 
   useEffect(() => {
     const mount = mountRef.current!;
@@ -61,7 +52,8 @@ export default function ThreeScene({ onReady }: ThreeSceneProps) {
     fillLight.position.set(-3, 1, -2);
     scene.add(fillLight);
 
-    // ── Fallback cube ─────────────────────────────────────────────────────────
+    // ── Fallback cube ────────────────────────────────────────────────────────
+    //    Visible while VRM is loading or if no model.vrm exists
     const fallbackGroup = new THREE.Group();
     const cubeGeo = new THREE.BoxGeometry(1, 1, 1);
     const cubeMat = new THREE.MeshStandardMaterial({ color: 0x7c6dfa, metalness: 0.4, roughness: 0.2 });
@@ -71,40 +63,110 @@ export default function ThreeScene({ onReady }: ThreeSceneProps) {
     fallbackGroup.position.set(0, 1.0, 0);
     scene.add(fallbackGroup);
 
-    // ── State ─────────────────────────────────────────────────────────────────
+    // ── VRM loader ────────────────────────────────────────────────────────────
     let currentVRM: VRM | null = null;
-    let mixer: THREE.AnimationMixer | null = null;
-    let currentAction: THREE.AnimationAction | null = null;
 
-    // ── Loaders ───────────────────────────────────────────────────────────────
     const loader = new GLTFLoader();
     loader.register((parser) => new VRMLoaderPlugin(parser));
-    loader.register((parser) => new VRMAnimationLoaderPlugin(parser));
 
-    // ── Load VRM ──────────────────────────────────────────────────────────────
+    // ── VRMA Animation Loader ────────────────────────────────────────────────
+    const animationLoader = new VRMAnimationLoader();
+    const animations = {};
+
+    const loadAnimation = (name) => {
+      animationLoader.load(
+        `/animations/${name}.vrma`,
+        (clip) => {
+          if (!currentVRM) {
+            console.warn(`[ThreeScene] VRM must be loaded before binding animation '${name}'`);
+            return;
+          }
+
+          // Ensure animation is bound to humanoid bones
+          const humanoid = currentVRM.humanoid;
+          if (!humanoid) {
+            console.warn(`[ThreeScene] No humanoid found in VRM for animation '${name}'`);
+            return;
+          }
+
+          const boundClip = VRMAnimationLoader.bindToHumanoid(clip, humanoid);
+          animations[name] = boundClip;
+          console.log(`[ThreeScene] Animation '${name}' loaded and bound ✅`);
+        },
+        undefined,
+        (error) => {
+          console.warn(`[ThreeScene] Failed to load animation '${name}':`, error);
+        },
+      );
+    };
+
+    // Load specific animations
+    ['Blush', 'Jump', 'Thinking'].forEach(loadAnimation);
+
+    // Animation mixer
+    let mixer = null;
+
+    const playAnimation = (name) => {
+      if (!currentVRM || !animations[name]) {
+        console.warn(`[ThreeScene] Cannot play animation '${name}'`);
+        return;
+      }
+
+      if (!mixer) {
+        mixer = new THREE.AnimationMixer(currentVRM.scene);
+      }
+
+      // Ensure AnimationMixer plays the clip
+      const action = mixer.clipAction(animations[name]);
+      action.reset().fadeIn(0.5).play();
+    };
+
+    const stopCurrentAnimation = () => {
+      if (currentAction) {
+        currentAction.fadeOut(0.5);
+        setCurrentAction(null);
+      }
+    };
+
+    const handleButtonClick = (animationName) => {
+      stopCurrentAnimation();
+      if (!currentVRM || !animations[animationName]) {
+        console.warn(`[ThreeScene] Cannot play animation '${animationName}'`);
+        return;
+      }
+
+      if (!mixer) {
+        mixer = new THREE.AnimationMixer(currentVRM.scene);
+      }
+
+      const action = mixer.clipAction(animations[animationName]);
+      action.reset().fadeIn(0.5).play();
+      setCurrentAction(action);
+    };
+
+    // Example: Play 'Blush' animation after VRM loads
     loader.load(
-      '/models/model.vrm',
+      '/models/avatar.vrm', // Updated path to load the VRM model
       (gltf) => {
         const vrm = gltf.userData.vrm as VRM | undefined;
         if (!vrm) {
-          console.warn('[ThreeScene] No VRM data in userData.');
+          console.warn('[ThreeScene] GLTF loaded but no VRM data found in userData.');
           return;
         }
 
+        // Optimise and orient the model
         VRMUtils.removeUnnecessaryJoints(vrm.scene);
         VRMUtils.rotateVRM0(vrm);
 
         currentVRM = vrm;
-        vrm.scene.rotation.y = Math.PI;
+        vrm.scene.rotation.y = Math.PI; // face toward +Z (camera)
         scene.add(vrm.scene);
         fallbackGroup.visible = false;
 
-        mixer = new THREE.AnimationMixer(vrm.scene);
+        console.log('[ThreeScene] VRM loaded ✅', vrm);
 
-        console.log('[ThreeScene] VRM loaded ✅');
-
-        // Notify parent that scene is ready
-        onReady?.(playAnimation, stopAnimation);
+        // Play 'Blush' animation
+        playAnimation('Blush');
       },
       (xhr) => {
         if (xhr.total) {
@@ -112,82 +174,37 @@ export default function ThreeScene({ onReady }: ThreeSceneProps) {
         }
       },
       (error) => {
-        console.warn('[ThreeScene] VRM load failed:', error);
+        // 404 / parse error — fallback cube stays visible
+        console.warn('[ThreeScene] VRM load failed (put model.vrm in apps/web/public/):', error);
       },
     );
 
-    // ── Play VRMA animation ───────────────────────────────────────────────────
-    const playAnimation = (vrmaPath: string) => {
-      if (!currentVRM || !mixer) return;
-
-      loader.load(
-        vrmaPath,
-        (gltf) => {
-          const vrmAnimations = gltf.userData.vrmAnimations as unknown[] | undefined;
-          const vrmAnimation = vrmAnimations?.[0];
-          if (!vrmAnimation) {
-            console.warn('[ThreeScene] No VRM animation data in', vrmaPath);
-            return;
-          }
-
-          // eslint-disable-next-line @typescript-eslint/no-explicit-any
-          const clip = createVRMAnimationClip(vrmAnimation as any, currentVRM!);
-
-          // Fade out old action
-          if (currentAction) {
-            currentAction.fadeOut(0.3);
-          }
-
-          // Play new action
-          const action = mixer!.clipAction(clip);
-          action.reset().fadeIn(0.3).play();
-          currentAction = action;
-
-          console.log('[ThreeScene] Playing animation:', vrmaPath);
-        },
-        undefined,
-        (error) => {
-          console.warn('[ThreeScene] Failed to load VRMA:', vrmaPath, error);
-        },
-      );
-    };
-
-    // ── Stop current animation ────────────────────────────────────────────────
-    const stopAnimation = () => {
-      if (!currentAction) return;
-      currentAction.fadeOut(0.5);
-      // We don't null it immediately so it can finish fading out, 
-      // but the idle sway logic will take over if we check .isRunning()
-      setTimeout(() => {
-        if (currentAction && !currentAction.isRunning()) {
-          currentAction = null;
-        }
-      }, 500);
-      console.log('[ThreeScene] Stopping animation');
-    };
-
     // ── Animation loop ────────────────────────────────────────────────────────
-    const clock = new THREE.Clock();
-    let animId = 0;
+    //   Use a single clock; read elapsed BEFORE getDelta() so it's never zero.
+    const clock   = new THREE.Clock();
+    let animId    = 0; // initialise to 0 — avoids TS2454 "used before assigned"
 
     const animate = () => {
       animId = requestAnimationFrame(animate);
 
-      const elapsed = clock.elapsedTime;
-      const delta   = clock.getDelta();
+      const elapsed = clock.elapsedTime;   // read first
+      const delta   = clock.getDelta();    // then advance
 
+      // Fallback cube rotation
       if (fallbackGroup.visible) {
         fallbackGroup.rotation.x = elapsed * 0.5;
         fallbackGroup.rotation.y = elapsed * 0.8;
       }
 
+      // VRM update (spring bones, constraints, MToon, etc.)
       if (currentVRM) {
-        mixer?.update(delta);
         currentVRM.update(delta);
-        // Gentle idle sway only when no animation is active
-        if (!currentAction || !currentAction.isRunning()) {
-          currentVRM.scene.rotation.y = Math.PI + Math.sin(elapsed * 0.4) * 0.3;
-        }
+        // Math.PI = face camera; oscillation adds gentle idle sway
+        currentVRM.scene.rotation.y = Math.PI + Math.sin(elapsed * 0.4) * 0.3;
+      }
+
+      if (mixer) {
+        mixer.update(delta);
       }
 
       renderer.render(scene, camera);
@@ -208,7 +225,9 @@ export default function ThreeScene({ onReady }: ThreeSceneProps) {
       cancelAnimationFrame(animId);
       window.removeEventListener('resize', handleResize);
 
-      if (currentVRM) VRMUtils.deepDispose(currentVRM.scene);
+      if (currentVRM) {
+        VRMUtils.deepDispose(currentVRM.scene);
+      }
       cubeGeo.dispose();
       cubeMat.dispose();
       wireMat.dispose();
@@ -216,13 +235,18 @@ export default function ThreeScene({ onReady }: ThreeSceneProps) {
 
       if (mount.contains(canvas)) mount.removeChild(canvas);
     };
-  // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
   return (
     <div
       ref={mountRef}
       style={{ position: 'absolute', inset: 0, overflow: 'hidden' }}
-    />
+    >
+      <div style={{ position: 'absolute', top: 10, left: 10, zIndex: 10 }}>
+        <button onClick={() => handleButtonClick('Idle')}>Idle</button>
+        <button onClick={() => handleButtonClick('Wave')}>Wave</button>
+        <button onClick={() => handleButtonClick('Dance')}>Dance</button>
+      </div>
+    </div>
   );
 }
