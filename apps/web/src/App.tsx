@@ -1,8 +1,14 @@
-// virtual-speaker-web\apps\web\src\App.tsx
-
-import { useState, useCallback } from 'react';
+import { useState, useCallback, useEffect, useRef } from 'react';
 import ThreeScene from './ThreeScene';
 import type { PlayAnimationFn, StopAnimationFn, FocusCameraFn, SpeakFn } from './ThreeScene';
+
+// Models available in /models/
+const MODELS = [
+  { id: 'model', name: 'Mặc định', path: '/models/model.vrm', icon: '👤' },
+  { id: 'boyGlass', name: 'Boy Glass', path: '/models/boyGlass.vrm', icon: '🕶️' },
+  { id: 'lady', name: 'Lady', path: '/models/lady.vrm', icon: '💃' },
+  { id: 'mewMew', name: 'Mew Mew', path: '/models/mewMew.vrm', icon: '🐱' },
+];
 
 // All VRMA animations available in /animations/
 const ACTIONS = [
@@ -32,16 +38,45 @@ export default function App() {
   // State cho việc chọn giọng đọc
   const [selectedVoice, setSelectedVoice] = useState('banmai');
   const FPT_VOICES = [
-    { id: 'banmai', name: 'Ban Mai (Nữ Bắc)' },
-    { id: 'thuminh', name: 'Thu Minh (Nữ Bắc)' },
-    { id: 'leminh', name: 'Lê Minh (Nam Bắc)' },
-    { id: 'giahuy', name: 'Gia Huy (Nam Trung)' },
-    { id: 'myan', name: 'Mỹ An (Nữ Trung)' },
-    { id: 'lannhi', name: 'Lan Nhi (Nữ Nam)' }
+    { id: 'banmai', name: 'Ban Mai (Nữ Bắc)', short: 'BM' },
+    { id: 'thuminh', name: 'Thu Minh (Nữ Bắc)', short: 'TM' },
+    { id: 'leminh', name: 'Lê Minh (Nam Bắc)', short: 'LM' },
+    { id: 'giahuy', name: 'Gia Huy (Nam Trung)', short: 'GH' },
+    { id: 'myan', name: 'Mỹ An (Nữ Trung)', short: 'MA' },
+    { id: 'lannhi', name: 'Lan Nhi (Nữ Nam)', short: 'LN' }
   ];
+
+  // State cho việc chọn nhân vật
+  const [selectedModel, setSelectedModel] = useState(MODELS[0].path);
 
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
+
+  // ── UI States for Redesign ──────────────────────────────────────────────
+  const [isVoicePickerOpen, setIsVoicePickerOpen] = useState(false);
+  const [isModelPickerOpen, setIsModelPickerOpen] = useState(false);
+  const [isEmotionPickerOpen, setIsEmotionPickerOpen] = useState(false);
+  
+  const voicePickerRef = useRef<HTMLDivElement>(null);
+  const modelPickerRef = useRef<HTMLDivElement>(null);
+  const emotionPickerRef = useRef<HTMLDivElement>(null);
+
+  // Click outside logic
+  useEffect(() => {
+    function handleClickOutside(event: MouseEvent) {
+      if (voicePickerRef.current && !voicePickerRef.current.contains(event.target as Node)) {
+        setIsVoicePickerOpen(false);
+      }
+      if (modelPickerRef.current && !modelPickerRef.current.contains(event.target as Node)) {
+        setIsModelPickerOpen(false);
+      }
+      if (emotionPickerRef.current && !emotionPickerRef.current.contains(event.target as Node)) {
+        setIsEmotionPickerOpen(false);
+      }
+    }
+    document.addEventListener("mousedown", handleClickOutside);
+    return () => document.removeEventListener("mousedown", handleClickOutside);
+  }, []);
 
   const handleReady = useCallback(
     (playFn: PlayAnimationFn, stopFn: StopAnimationFn, focusFn: FocusCameraFn, speakFn: SpeakFn) => {
@@ -58,6 +93,7 @@ export default function App() {
     if (!playAnimation) return;
     setActiveAction(id);
     playAnimation(`/animations/${id}.vrma`);
+    setIsEmotionPickerOpen(false); // Close drawer after selection
   };
 
   const handleCancelAction = () => {
@@ -76,133 +112,164 @@ export default function App() {
 
   // ── Xử lý Phát âm thanh ──────────────────────────────────────────────────
   const handleSpeak = () => {
-    if (!speak) return;
-    speak(textToSpeak, selectedVoice); // Truyền text và giọng đọc đã chọn
+    if (!speak || !textToSpeak.trim()) return;
+    speak(textToSpeak, selectedVoice);
   };
+
+  const handleKeyDown = (e: React.KeyboardEvent) => {
+    if (e.key === 'Enter' && !e.shiftKey) {
+      e.preventDefault();
+      handleSpeak();
+    }
+  };
+
+  const currentVoiceShort = FPT_VOICES.find(v => v.id === selectedVoice)?.short || 'VN';
+  const currentModelIcon = MODELS.find(m => m.path === selectedModel)?.icon || '👤';
 
   return (
     <main className="container">
       <div className="scene-wrapper">
-        <ThreeScene onReady={handleReady} />
+        <ThreeScene onReady={handleReady} modelUrl={selectedModel} />
       </div>
 
-      <div className="card">
-        <div className="icon">🎙️</div>
-        <h1>Virtual Speaker</h1>
-        <p className="subtitle">Your AI-powered presentation companion</p>
-      </div>
+      <button 
+        className={`camera-fab${isFocused ? ' active' : ''}`}
+        onClick={handleToggleFocus}
+        disabled={!ready}
+        title={isFocused ? "Lùi Camera" : "Phóng to Camera"}
+      >
+        {isFocused ? "🔍-" : "🔍+"}
+      </button>
 
-      <div className="action-panel">
+      <div className="input-bar-container">
+        <div className="input-pill">
+          {/* Voice Selector */}
+          <div className="voice-selector-wrapper" ref={voicePickerRef}>
+            <button 
+              className="voice-btn-trigger"
+              onClick={() => setIsVoicePickerOpen(!isVoicePickerOpen)}
+              disabled={!ready}
+              title="Chọn giọng nói"
+            >
+              {currentVoiceShort}
+            </button>
+            
+            {isVoicePickerOpen && (
+              <div className="voice-popover">
+                {FPT_VOICES.map(voice => (
+                  <button
+                    key={voice.id}
+                    className={`voice-option${selectedVoice === voice.id ? ' active' : ''}`}
+                    onClick={() => {
+                      setSelectedVoice(voice.id);
+                      setIsVoicePickerOpen(false);
+                    }}
+                  >
+                    {voice.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-        {/* ── Khu vực Giao tiếp (Text-to-Speech) ────────────────────────────── */}
-        <div className="action-panel-header" style={{ borderBottom: '1px solid #eee', paddingBottom: '10px', marginBottom: '10px' }}>
-          <span className="action-panel-title">Giao tiếp</span>
-          {!ready && <span className="action-panel-loading">Loading model…</span>}
-        </div>
+          <div className="divider" />
 
-        <div style={{ display: 'flex', flexDirection: 'column', gap: '10px', marginBottom: '20px' }}>
+          {/* Model Selector */}
+          <div className="voice-selector-wrapper" ref={modelPickerRef}>
+            <button 
+              className="voice-btn-trigger"
+              onClick={() => setIsModelPickerOpen(!isModelPickerOpen)}
+              disabled={!ready}
+              title="Chọn nhân vật"
+            >
+              {currentModelIcon}
+            </button>
+            
+            {isModelPickerOpen && (
+              <div className="voice-popover">
+                {MODELS.map(model => (
+                  <button
+                    key={model.id}
+                    className={`voice-option${selectedModel === model.path ? ' active' : ''}`}
+                    onClick={() => {
+                      setSelectedModel(model.path);
+                      setIsModelPickerOpen(false);
+                      setReady(false); // Reset ready state while loading new model
+                    }}
+                  >
+                    {model.icon} {model.name}
+                  </button>
+                ))}
+              </div>
+            )}
+          </div>
 
-          {/* Ô chọn giọng đọc */}
-          <select
-            value={selectedVoice}
-            onChange={(e) => setSelectedVoice(e.target.value)}
-            disabled={!ready}
-            style={{
-              padding: '8px',
-              borderRadius: '6px',
-              border: '1px solid #ccc',
-              cursor: ready ? 'pointer' : 'not-allowed',
-              backgroundColor: 'white'
-            }}
-          >
-            {FPT_VOICES.map(voice => (
-              <option key={voice.id} value={voice.id}>
-                {voice.name}
-              </option>
-            ))}
-          </select>
-
-          {/* Ô nhập văn bản */}
+          {/* Text Input */}
           <input
             type="text"
+            className="pill-input"
             value={textToSpeak}
             onChange={(e) => setTextToSpeak(e.target.value)}
+            onKeyDown={handleKeyDown}
             disabled={!ready}
-            placeholder="Nhập câu bạn muốn nói..."
-            style={{
-              width: '100%',
-              padding: '8px 12px',
-              borderRadius: '6px',
-              border: '1px solid #ccc'
-            }}
+            placeholder={ready ? "Nhập văn bản..." : "Đang tải..."}
           />
 
-          <div style={{ display: 'flex', gap: '8px' }}>
-            <button
-              onClick={handleToggleFocus}
-              disabled={!ready}
-              style={{
-                flex: 1,
-                padding: '8px',
-                backgroundColor: isFocused ? '#ef4444' : '#10b981',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: ready ? 'pointer' : 'not-allowed',
-                fontWeight: 'bold'
-              }}
-            >
-              {isFocused ? "Lùi Camera" : "Phóng to Camera"}
-            </button>
+          {/* Action Buttons */}
+          <div className="pill-actions">
+            <div style={{ position: 'relative' }} ref={emotionPickerRef}>
+              <button 
+                className={`icon-btn${isEmotionPickerOpen ? ' active' : ''}`}
+                onClick={() => setIsEmotionPickerOpen(!isEmotionPickerOpen)}
+                disabled={!ready}
+                title="Cảm xúc"
+              >
+                😊
+              </button>
 
-            <button
+              {isEmotionPickerOpen && (
+                <div className="emotion-drawer">
+                  <div className="drawer-header">
+                    <span>Cảm xúc & Hành động</span>
+                    {activeAction && (
+                      <button 
+                        style={{ background: 'none', border: 'none', color: '#ef4444', cursor: 'pointer', fontSize: '0.6rem' }}
+                        onClick={handleCancelAction}
+                      >
+                        Dừng lại
+                      </button>
+                    )}
+                  </div>
+                  <div className="emotion-grid">
+                    {ACTIONS.map(({ id, label, emoji }) => (
+                      <button
+                        key={id}
+                        className={`emotion-item${activeAction === id ? ' active' : ''}`}
+                        onClick={() => handleAction(id)}
+                        title={label}
+                      >
+                        <span className="emotion-emoji">{emoji}</span>
+                        <span className="emotion-label">{label}</span>
+                      </button>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </div>
+
+            <button 
+              className="icon-btn send-btn"
               onClick={handleSpeak}
-              disabled={!ready}
-              style={{
-                flex: 1,
-                padding: '8px',
-                backgroundColor: '#3b82f6',
-                color: 'white',
-                border: 'none',
-                borderRadius: '6px',
-                cursor: ready ? 'pointer' : 'not-allowed',
-                fontWeight: 'bold'
-              }}
+              disabled={!ready || !textToSpeak.trim()}
+              title="Gửi"
             >
-              Nói
+              🚀
             </button>
           </div>
         </div>
-        {/* ──────────────────────────────────────────────────────────────────── */}
 
-        <div className="action-panel-header">
-          <span className="action-panel-title">Actions</span>
-        </div>
-
-        <div className="action-grid">
-          {ACTIONS.map(({ id, label, emoji }) => (
-            <button
-              key={id}
-              id={`action-${id.toLowerCase()}`}
-              className={`action-btn${activeAction === id ? ' active' : ''}${!ready ? ' disabled' : ''}`}
-              onClick={() => handleAction(id)}
-              disabled={!ready}
-              title={label}
-            >
-              <span className="action-emoji">{emoji}</span>
-              <span className="action-label">{label}</span>
-            </button>
-          ))}
-        </div>
-
-        <div className="action-panel-footer">
-          <button
-            className={`cancel-btn${!activeAction ? ' disabled' : ''}`}
-            onClick={handleCancelAction}
-            disabled={!activeAction}
-          >
-            <span>Stop Current Action</span>
-          </button>
+        <div className="enter-helper">
+          Nhấn <span className="enter-key">Enter</span> để gửi
         </div>
       </div>
     </main>

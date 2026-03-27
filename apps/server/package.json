@@ -10,6 +10,7 @@
   "dependencies": {
     "@virtual-speaker/shared": "*",
     "cors": "^2.8.5",
+    "dotenv": "^17.3.1",
     "express": "^4.19.2"
   },
   "devDependencies": {
