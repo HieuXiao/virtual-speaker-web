@@ -1,0 +1,26 @@
+services:
+  - type: web
+    name: virtual-speaker
+    env: node
+    plan: free # or starter
+    rootDir: .
+    buildCommand: |
+      npm install
+      npm run build
+      cd apps/server && npx prisma db push
+    startCommand: npm run start -w apps/server
+    envVars:
+      - key: NODE_ENV
+        value: production
+      - key: FPT_API_KEY
+        sync: false # Set manually in Render dashboard
+      - key: DATABASE_URL
+        value: file:./prisma/dev.db
+    disk:
+      name: virtual-speaker-data
+      mountPath: /opt/render/project/src/apps/server/prisma # Keep SQLite DB persistent
+      sizeGB: 1
+    # Adding another disk for uploads is limited in Render Free tier (only 1 disk per service)
+    # We might need to store uploads and DB in the same persistent path if possible, 
+    # or use an external storage like Cloudinary for the models later.
+    # For now, let's prioritize the database.

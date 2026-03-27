@@ -44,6 +44,10 @@ app.use('/models', express.static(path.join(__dirname, '../public/models')));
 app.use('/animations', express.static(path.join(__dirname, '../public/animations')));
 app.use('/uploads', express.static(path.join(__dirname, '../public/uploads')));
 
+// Serve Frontend in Production
+const frontendPath = path.join(__dirname, '../../web/dist');
+app.use(express.static(frontendPath));
+
 // Swagger UI
 app.use('/api-docs', swaggerUi.serve, swaggerUi.setup(specs));
 
@@ -224,6 +228,11 @@ app.post('/api/tts', async (req, res) => {
 
 app.get('/health', (_req, res) => {
   res.json({ status: 'ok' });
+});
+
+// Catch-all route to serve index.html (SPA support)
+app.get('*', (_req, res) => {
+  res.sendFile(path.join(__dirname, '../../web/dist/index.html'));
 });
 
 app.listen(PORT, () => {
