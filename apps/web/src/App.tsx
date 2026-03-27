@@ -2,13 +2,12 @@ import { useState, useCallback, useEffect, useRef } from 'react';
 import ThreeScene from './ThreeScene';
 import type { PlayAnimationFn, StopAnimationFn, FocusCameraFn, SpeakFn } from './ThreeScene';
 
-// Models available in /models/
-const MODELS = [
-  { id: 'model', name: 'Mặc định', path: '/models/model.vrm', icon: '👤' },
-  { id: 'boyGlass', name: 'Boy Glass', path: '/models/boyGlass.vrm', icon: '🕶️' },
-  { id: 'lady', name: 'Lady', path: '/models/lady.vrm', icon: '💃' },
-  { id: 'mewMew', name: 'Mew Mew', path: '/models/mewMew.vrm', icon: '🐱' },
-];
+interface VrmModel {
+  id: number | string;
+  name: string;
+  path: string;
+  icon: string;
+}
 
 // All VRMA animations available in /animations/
 const ACTIONS = [
@@ -46,8 +45,10 @@ export default function App() {
     { id: 'lannhi', name: 'Lan Nhi (Nữ Nam)', short: 'LN' }
   ];
 
-  // State cho việc chọn nhân vật
-  const [selectedModel, setSelectedModel] = useState(MODELS[0].path);
+  // State cho nhân vật
+  const [models, setModels] = useState<VrmModel[]>([]);
+  const [selectedModel, setSelectedModel] = useState<string>('');
+  const [isUploading, setIsUploading] = useState(false);
 
   const [activeAction, setActiveAction] = useState<string | null>(null);
   const [ready, setReady] = useState(false);
@@ -60,6 +61,57 @@ export default function App() {
   const voicePickerRef = useRef<HTMLDivElement>(null);
   const modelPickerRef = useRef<HTMLDivElement>(null);
   const emotionPickerRef = useRef<HTMLDivElement>(null);
+  const fileInputRef = useRef<HTMLInputElement>(null);
+
+  // Fetch models from DB
+  const fetchModels = useCallback(async () => {
+    try {
+      const resp = await fetch('/api/models');
+      const data = await resp.json();
+      setModels(data);
+      if (data.length > 0 && !selectedModel) {
+        setSelectedModel(data[0].path);
+      }
+    } catch (err) {
+      console.error("Lỗi lấy danh sách nhân vật:", err);
+    }
+  }, [selectedModel]);
+
+  useEffect(() => {
+    fetchModels();
+  }, [fetchModels]);
+
+  // Handle file upload
+  const handleFileUpload = async (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0];
+    if (!file) return;
+
+    setIsUploading(true);
+    const formData = new FormData();
+    formData.append('file', file);
+    formData.append('name', file.name.replace('.vrm', ''));
+    formData.append('icon', '👤');
+
+    try {
+      const resp = await fetch('/api/models', {
+        method: 'POST',
+        body: formData,
+      });
+      if (resp.ok) {
+        await fetchModels();
+        setIsModelPickerOpen(false);
+      } else {
+        const err = await resp.json();
+        alert(err.error || "Tải lên thất bại");
+      }
+    } catch (err) {
+      console.error("Lỗi tải nhân vật:", err);
+      alert("Đã có lỗi xảy ra khi tải nhân vật!");
+    } finally {
+      setIsUploading(false);
+      if (fileInputRef.current) fileInputRef.current.value = '';
+    }
+  };
 
   // Click outside logic
   useEffect(() => {
@@ -124,12 +176,12 @@ export default function App() {
   };
 
   const currentVoiceShort = FPT_VOICES.find(v => v.id === selectedVoice)?.short || 'VN';
-  const currentModelIcon = MODELS.find(m => m.path === selectedModel)?.icon || '👤';
+  const currentModelIcon = models.find(m => m.path === selectedModel)?.icon || '👤';
 
   return (
     <main className="container">
       <div className="scene-wrapper">
-        <ThreeScene onReady={handleReady} modelUrl={selectedModel} />
+        {selectedModel && <ThreeScene onReady={handleReady} modelUrl={selectedModel} />}
       </div>
 
       <button 
@@ -179,15 +231,15 @@ export default function App() {
             <button 
               className="voice-btn-trigger"
               onClick={() => setIsModelPickerOpen(!isModelPickerOpen)}
-              disabled={!ready}
+              disabled={!ready || isUploading}
               title="Chọn nhân vật"
             >
-              {currentModelIcon}
+              {isUploading ? "⏳" : currentModelIcon}
             </button>
             
             {isModelPickerOpen && (
               <div className="voice-popover">
-                {MODELS.map(model => (
+                {models.map(model => (
                   <button
                     key={model.id}
                     className={`voice-option${selectedModel === model.path ? ' active' : ''}`}
@@ -200,6 +252,24 @@ export default function App() {
                     {model.icon} {model.name}
                   </button>
                 ))}
+                
+                <div className="popover-divider" style={{ margin: '4px 0', height: '1px', background: 'rgba(255,255,255,0.1)' }} />
+                
+                <button
+                  className="voice-option"
+                  style={{ color: '#4ade80' }}
+                  onClick={() => fileInputRef.current?.click()}
+                  disabled={isUploading}
+                >
+                  ➕ Thêm nhân vật...
+                </button>
+                <input 
+                  type="file" 
+                  ref={fileInputRef} 
+                  style={{ display: 'none' }} 
+                  accept=".vrm" 
+                  onChange={handleFileUpload}
+                />
               </div>
             )}
           </div>

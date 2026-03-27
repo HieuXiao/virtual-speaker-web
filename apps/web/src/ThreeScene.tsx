@@ -130,7 +130,7 @@ export default function ThreeScene({ onReady, modelUrl = '/models/model.vrm' }: 
         if (currentVRMRef.current) currentVRMRef.current.expressionManager?.setValue('aa', 0);
       }
       try {
-        const response = await fetch('http://localhost:3001/api/tts', {
+        const response = await fetch('/api/tts', {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({ text, voice })
