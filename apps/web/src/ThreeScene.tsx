@@ -35,10 +35,15 @@ export default function ThreeScene({ onReady, modelUrl = '/models/model.vrm' }: 
   const lipSyncIntervalRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const animationsCacheRef = useRef<{ [url: string]: THREE.AnimationClip }>({});
   const lastTimeRef = useRef(performance.now());
+  const cameraRef = useRef<THREE.PerspectiveCamera | null>(null);
+  const idleCameraPosRef = useRef(new THREE.Vector3(0, 1.4, 4));
+  const focusedCameraPosRef = useRef(new THREE.Vector3(0, 1.5, 1.2));
+  const lookAtTargetRef = useRef(new THREE.Vector3(0, 1.0, 0));
   const playAnimationRef = useRef<PlayAnimationFn | null>(null);
   const stopAnimationRef = useRef<StopAnimationFn | null>(null);
   const focusCameraRef = useRef<FocusCameraFn | null>(null);
   const speakRef = useRef<SpeakFn | null>(null);
+  const isFocusedRef = useRef(false);
 
   // Loaders
   const loader = new GLTFLoader();
@@ -69,10 +74,9 @@ export default function ThreeScene({ onReady, modelUrl = '/models/model.vrm' }: 
     sceneRef.current = scene;
 
     const camera = new THREE.PerspectiveCamera(30, w / h, 0.1, 50);
-    const idleCameraPos = new THREE.Vector3(0, 1.4, 4);
-    const focusedCameraPos = new THREE.Vector3(0, 1.5, 1.2);
-    camera.position.copy(idleCameraPos);
-    camera.lookAt(0, 1.0, 0);
+    cameraRef.current = camera;
+    camera.position.copy(idleCameraPosRef.current);
+    camera.lookAt(lookAtTargetRef.current);
 
     const ambient = new THREE.AmbientLight(0xffffff, 0.6);
     scene.add(ambient);
@@ -118,9 +122,11 @@ export default function ThreeScene({ onReady, modelUrl = '/models/model.vrm' }: 
     };
 
     focusCameraRef.current = (isFocused: boolean) => {
-      const targetPos = isFocused ? focusedCameraPos : idleCameraPos;
-      camera.position.copy(targetPos);
-      camera.lookAt(0, 1.3, 0);
+      isFocusedRef.current = isFocused;
+      if (!cameraRef.current) return;
+      const targetPos = isFocused ? focusedCameraPosRef.current : idleCameraPosRef.current;
+      cameraRef.current.position.copy(targetPos);
+      cameraRef.current.lookAt(lookAtTargetRef.current);
     };
 
     speakRef.current = async (text: string, voice: string) => {
@@ -223,6 +229,31 @@ export default function ThreeScene({ onReady, modelUrl = '/models/model.vrm' }: 
         vrm.scene.rotation.y = Math.PI;
         scene.add(vrm.scene);
         console.log(`[ThreeScene] Model loaded: ${modelUrl}`);
+
+        // --- Dynamic Camera Fit ---
+        const head = vrm.humanoid?.getNormalizedBoneNode('head');
+        let headHeight = 1.6; // Default fallback
+        if (head) {
+          const worldPos = new THREE.Vector3();
+          head.getWorldPosition(worldPos);
+          headHeight = worldPos.y;
+        } else {
+          // Bounding box fallback
+          const box = new THREE.Box3().setFromObject(vrm.scene);
+          headHeight = box.max.y;
+        }
+
+        // Adjust camera positions based on head height
+        lookAtTargetRef.current.set(0, headHeight * 0.9, 0);
+        idleCameraPosRef.current.set(0, headHeight * 0.9, headHeight * 2.5);
+        focusedCameraPosRef.current.set(0, headHeight * 0.95, 1.75);
+
+        // Apply immediately
+        if (cameraRef.current) {
+          const targetPos = isFocusedRef.current ? focusedCameraPosRef.current : idleCameraPosRef.current;
+          cameraRef.current.position.copy(targetPos);
+          cameraRef.current.lookAt(lookAtTargetRef.current);
+        }
 
         if (onReady && playAnimationRef.current && stopAnimationRef.current && focusCameraRef.current && speakRef.current) {
           onReady(playAnimationRef.current, stopAnimationRef.current, focusCameraRef.current, speakRef.current);
